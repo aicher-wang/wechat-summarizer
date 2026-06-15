@@ -1,0 +1,11 @@
+# 核心依赖
+wechat-cli>=0.2.4
+anthropic>=0.40.0
+python-dotenv>=1.0.0
+
+# 可选：Word 导出（pip install python-docx）
+# python-docx>=1.1.0
+
+# 可选：PDF 导出（二选一）
+# 方式1（推荐，纯 Python）：pip install weasyprint
+# 方式2（需系统安装 wkhtmltopdf）：pip install pdfkit

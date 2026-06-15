@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project state (don't commit local data)
+state/
+exports/
+*.json
+!requirements.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
