@@ -1,6 +1,7 @@
 """微信聊天记录总结器 — 主入口"""
 import argparse
 import io
+import re
 import sys
 import os
 from datetime import date, datetime
@@ -187,6 +188,23 @@ def cmd_daily(args: argparse.Namespace) -> int:
 
     account_purpose = account.get("purpose", "")
 
+    # 提取当前用户 wxid
+    db_dir = account.get("db_dir", "")
+    wxid_match = re.search(r'(wxid_[a-zA-Z0-9]+)', db_dir)
+    MY_WXID = wxid_match.group(1) if wxid_match else ""
+
+    # 查询当前用户昵称
+    MY_DISPLAY_NAME = "我"
+    try:
+        result = collector.run_wechat_cli(
+            account["command_prefix"],
+            ["contacts", "--query", MY_WXID, "--format", "json"]
+        )
+        if result["ok"] and result["data"]:
+            MY_DISPLAY_NAME = result["data"][0].get("nick_name", "我") or result["data"][0].get("remark", "我")
+    except Exception:
+        pass
+
     # ---- ③ 获取会话列表 ----
     try:
         sessions = collector.get_sessions(args.account_id, limit=args.session_limit)
@@ -255,7 +273,7 @@ def cmd_daily(args: argparse.Namespace) -> int:
 
         # 计算统计（规则计算，不调 LLM）
         try:
-            session_stats = stats.compute_all_stats(raw_messages)
+            session_stats = stats.compute_all_stats(raw_messages, my_wxid=MY_WXID, my_display_name=MY_DISPLAY_NAME)
         except Exception:
             session_stats = {}
 
@@ -286,13 +304,15 @@ def cmd_daily(args: argparse.Namespace) -> int:
             session_summaries=session_summaries,
             target_date=target_date,
             classification=classification,
+            my_display_name=MY_DISPLAY_NAME,
         )
     else:
-        report = report_renderer.render_newspaper_report(
+        report = report_renderer.render_newspaper_report_cards(
             account_purpose=account_purpose,
             session_summaries=session_summaries,
             target_date=target_date,
             classification=classification,
+            my_display_name=MY_DISPLAY_NAME,
         )
 
     # ---- ⑧ 输出 ----
