@@ -33,3 +33,23 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Temp / debug output
+run_log*.txt
+debug*.txt
+*_check.txt
+check.txt
+verify.txt
+preview.txt
+html_*.txt
+rc.txt
+sessions.txt
+tangchen.txt
+test_stats.py
+summary_output.*
+summary_utf8.md
+run_out.txt
+
+# Check scripts
+_check.py
+_*.py

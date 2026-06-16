@@ -4,11 +4,46 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
+
+# =============================================================================
+# 通用消息解析器（同时支持结构化 dict 和预格式化字符串）
+# =============================================================================
+
+def _parse_message(msg) -> tuple[str, str, str]:
+    """
+    解析任意消息格式，返回 (sender, content, time_str)。
+    支持：
+      - 结构化 dict：msg.get("sender"), msg.get("content"), msg.get("time")
+      - 预格式化字符串："[2026-06-15 13:42] sender: content" 或 "sender: content"
+    """
+    if isinstance(msg, str):
+        # 预格式化字符串解析
+        content = msg.strip()
+        sender = ""
+        time_str = ""
+        # 格式: "[时间] sender: content" 或 "sender: content"
+        m = re.match(r"\[([^\]]+)\]\s*([^:\s]+)\s*:\s*", content)
+        if m:
+            time_str = m.group(1)
+            sender = m.group(2).strip()
+            content = content[m.end():].strip()
+        elif ": " in content:
+            # Fallback: "sender: content"
+            parts = content.split(": ", 1)
+            sender = parts[0].strip()
+            content = parts[1].strip() if len(parts) > 1 else ""
+        return sender, content, time_str
+
+    sender = str(msg.get("sender") or msg.get("from") or msg.get("nickname") or "")
+    content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
+    time_str = str(msg.get("time") or msg.get("datetime") or "")
+    return sender, content, time_str
+
 # =============================================================================
 # 活跃脉搏（消息时间分布）
 # =============================================================================
 
-def compute_activity_pulse(messages: list[dict]) -> dict[str, Any]:
+def compute_activity_pulse(messages: list) -> dict[str, Any]:
     """
     计算群活跃脉搏（消息时间分布）。
     返回每小时消息数量分布。
@@ -20,9 +55,10 @@ def compute_activity_pulse(messages: list[dict]) -> dict[str, Any]:
     total = 0
 
     for msg in messages:
-        msg_time = str(msg.get("time") or msg.get("datetime") or "")
+        _, _, msg_time = _parse_message(msg)
         if msg_time:
             try:
+                # 支持 "2026-06-15 13:42" 或 "2026-06-15T13:42" 格式
                 dt = datetime.fromisoformat(msg_time.replace(" ", "T"))
                 hour_counter[dt.hour] += 1
                 total += 1
@@ -83,18 +119,22 @@ def format_activity_pulse(pulse: dict) -> str:
 # 发言排行榜
 # =============================================================================
 
-def compute_speaker_stats(messages: list[dict]) -> dict[str, Any]:
+def compute_speaker_stats(messages: list, my_wxid: str = "", my_display_name: str = "我") -> dict[str, Any]:
     """
     计算发言统计。
     返回发言次数排行 + 最少发言。
+    my_wxid / my_display_name: 用于将"me"替换为用户的真实昵称。
     """
     if not messages:
         return {"ranked": [], "top_speaker": None, "quietest": None, "total": 0}
 
     sender_counter = Counter()
     for msg in messages:
-        sender = str(msg.get("sender") or msg.get("from") or msg.get("nickname") or "").strip()
+        sender, _, _ = _parse_message(msg)
         if sender and sender not in ("未知", "", "系统"):
+            # 将"me"或自己的wxid替换为显示名
+            if sender in ("me", my_wxid):
+                sender = my_display_name
             sender_counter[sender] += 1
 
     if not sender_counter:
@@ -147,11 +187,11 @@ def format_speaker_stats(stats: dict) -> str:
 # 今日热词
 # =============================================================================
 
-def compute_hot_words(messages: list[dict], top_n: int = 10) -> dict[str, Any]:
+def compute_hot_words(messages: list, top_n: int = 10) -> dict[str, Any]:
     """提取高频词"""
     all_text_parts = []
     for msg in messages:
-        content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
+        _, content, _ = _parse_message(msg)
         if content:
             all_text_parts.append(content)
 
@@ -219,11 +259,11 @@ def format_hot_words(word_stats: dict) -> str:
 # Emoji 风云榜
 # =============================================================================
 
-def compute_emoji_stats(messages: list[dict]) -> dict[str, Any]:
+def compute_emoji_stats(messages: list) -> dict[str, Any]:
     """统计 Emoji 使用"""
     all_text_parts = []
     for msg in messages:
-        content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
+        _, content, _ = _parse_message(msg)
         if content:
             all_text_parts.append(content)
 
@@ -274,7 +314,7 @@ def format_emoji_stats(emoji_stats: dict) -> str:
 # 今日图片/视频/文件
 # =============================================================================
 
-def compute_media_stats(messages: list[dict]) -> dict[str, Any]:
+def compute_media_stats(messages: list) -> dict[str, Any]:
     """统计图片、视频、文件"""
     images = 0
     videos = 0
@@ -285,8 +325,10 @@ def compute_media_stats(messages: list[dict]) -> dict[str, Any]:
 
     # 微信消息类型的简单判断（通过内容关键词）
     for msg in messages:
-        content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
-        msg_type = str(msg.get("msg_type") or msg.get("type") or "").lower()
+        _, content, _ = _parse_message(msg)
+        msg_type = ""
+        if isinstance(msg, dict):
+            msg_type = str(msg.get("msg_type") or msg.get("type") or "").lower()
 
         if "图片" in content or msg_type in ("3", "image", "img"):
             images += 1
@@ -343,11 +385,11 @@ def format_media_stats(media_stats: dict) -> str:
 # 链接雷达
 # =============================================================================
 
-def compute_link_stats(messages: list[dict]) -> dict[str, Any]:
+def compute_link_stats(messages: list) -> dict[str, Any]:
     """统计链接类型"""
     all_text_parts = []
     for msg in messages:
-        content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
+        _, content, _ = _parse_message(msg)
         if content:
             all_text_parts.append(content)
 
@@ -407,7 +449,7 @@ def format_link_stats(link_stats: dict) -> str:
 # 群话题天气
 # =============================================================================
 
-def compute_group_weather(messages: list[dict], stats: dict) -> str:
+def compute_group_weather(messages: list, stats: dict) -> str:
     """根据统计数据生成群话题天气描述"""
     pulse = compute_activity_pulse(messages)
     speakers = compute_speaker_stats(messages)
@@ -449,6 +491,7 @@ def compute_group_weather(messages: list[dict], stats: dict) -> str:
         emotion = "情绪：💬 正常交流"
 
     # 判断是否一边倒
+    distribution = "📊 暂无数据"
     if ranked:
         top_ratio = top_speaker_count / total if total > 0 else 0
         if top_ratio > 0.4:
@@ -467,13 +510,14 @@ def compute_group_weather(messages: list[dict], stats: dict) -> str:
 # 统一汇总：一次调用计算所有统计
 # =============================================================================
 
-def compute_all_stats(messages: list[dict]) -> dict[str, Any]:
+def compute_all_stats(messages: list, my_wxid: str = "", my_display_name: str = "我") -> dict[str, Any]:
     """
     对消息列表计算所有统计数据。
     用于填充报纸风格的各统计模块。
+    my_wxid / my_display_name: 用于将"me"替换为用户的真实昵称。
     """
     pulse = compute_activity_pulse(messages)
-    speakers = compute_speaker_stats(messages)
+    speakers = compute_speaker_stats(messages, my_wxid=my_wxid, my_display_name=my_display_name)
     hot_words = compute_hot_words(messages)
     emoji_stats = compute_emoji_stats(messages)
     media_stats = compute_media_stats(messages)
@@ -503,9 +547,10 @@ def format_all_stats(stats: dict) -> list[str]:
 
     p = stats.get("activity_pulse", {})
     if p.get("total", 0) > 0:
-        peak = p.get("peak_hour", 0)
+        peak = p.get("peak_hour")
         density = p.get("density", 0)
-        lines.append(f"⏰ 最热时段：{peak:02d}:00（均 {density} 条/小时）")
+        peak_str = f"{peak:02d}:00" if peak is not None else "?"
+        lines.append(f"⏰ 最热时段：{peak_str}（均 {density} 条/小时）")
 
     s = stats.get("speaker_stats", {})
     ranked = s.get("ranked", [])

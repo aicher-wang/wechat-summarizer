@@ -27,7 +27,8 @@ def is_system_username(username: str, include_system: bool = False) -> bool:
 
 
 def split_command_prefix(command_prefix: str) -> list[str]:
-    return shlex.split(command_prefix, posix=(platform.system() != "Windows"))
+    # Use posix=True to properly strip quotes from paths on all platforms
+    return shlex.split(command_prefix, posix=True)
 
 
 def run_wechat_cli(command_prefix: str, args: list[str], timeout: int = 120) -> dict[str, Any]:
@@ -40,9 +41,6 @@ def run_wechat_cli(command_prefix: str, args: list[str], timeout: int = 120) -> 
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             timeout=timeout,
             check=False,
             env=env,
@@ -53,12 +51,12 @@ def run_wechat_cli(command_prefix: str, args: list[str], timeout: int = 120) -> 
         return {"ok": False, "error": f"命令超时（{timeout}秒）"}
 
     if proc.returncode != 0:
-        return {"ok": False, "error": proc.stderr.strip()}
+        return {"ok": False, "error": proc.stderr.decode("utf-8", errors="replace").strip()}
 
     try:
-        data = json.loads(proc.stdout.strip() or "[]")
+        data = json.loads(proc.stdout.decode("utf-8", errors="replace").strip() or "[]")
     except json.JSONDecodeError:
-        data = proc.stdout.strip()
+        data = proc.stdout.decode("utf-8", errors="replace").strip()
 
     return {"ok": True, "data": data, "stdout": proc.stdout, "stderr": proc.stderr}
 
@@ -89,10 +87,11 @@ def extract_keywords(text: str, top_n: int = 10) -> str:
     return "、".join([w for w, _ in counter.most_common(top_n)])
 
 
-def extract_metadata(messages: list[dict]) -> dict[str, Any]:
+def extract_metadata(messages: list) -> dict[str, Any]:
     """
     从消息列表中提取元数据，用于填充 prompt 上下文。
     不调 LLM，纯规则计算。
+    支持结构化 dict 消息或预格式化字符串。
     """
     if not messages:
         return {
@@ -106,21 +105,27 @@ def extract_metadata(messages: list[dict]) -> dict[str, Any]:
 
     # 提取发言人
     senders = set()
+    all_text_parts = []
     for msg in messages:
-        sender = str(msg.get("sender") or msg.get("from") or msg.get("nickname") or "").strip()
-        if sender and sender not in ("未知", "", "系统"):
-            senders.add(sender)
+        if isinstance(msg, str):
+            # 预格式化字符串: "[时间] sender：content"
+            all_text_parts.append(msg)
+            # 简单解析出发送人
+            m = re.match(r"\[([^\]]+)\]\s*([^：\s]+)：", msg)
+            if m:
+                senders.add(m.group(2).strip())
+        else:
+            sender = str(msg.get("sender") or msg.get("from") or msg.get("nickname") or "").strip()
+            if sender and sender not in ("未知", "", "系统"):
+                senders.add(sender)
+            content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
+            if content:
+                all_text_parts.append(content)
+
     participant_count = len(senders)
     active_participants = participant_count  # 有发言的 = 参与人数
 
-    # 提取所有文本内容用于关键词提取
-    all_text_parts = []
-    for msg in messages:
-        content = str(msg.get("content") or msg.get("text") or msg.get("message") or "")
-        if content:
-            all_text_parts.append(content)
     all_text = " ".join(all_text_parts)
-
     keywords = extract_keywords(all_text, top_n=10)
 
     return {
@@ -231,8 +236,11 @@ def get_multi_account_sessions(account_ids: list[str] = None) -> dict[str, list[
     return result
 
 
-def format_message_for_summary(msg: dict) -> str:
-    """将单条消息格式化为可读文本"""
+def format_message_for_summary(msg: dict | str) -> str:
+    """将单条消息格式化为可读文本（支持结构化 dict 或预格式化字符串）"""
+    # Handle pre-formatted string from wechat-cli
+    if isinstance(msg, str):
+        return msg.strip()
     sender = str(msg.get("sender") or msg.get("from") or msg.get("nickname") or "未知").strip()
     content = str(msg.get("content") or msg.get("text") or msg.get("message") or "").strip()
     msg_time = str(msg.get("time") or msg.get("datetime") or "").strip()

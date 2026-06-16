@@ -12,6 +12,7 @@ def summarize_session(
     messages_text: str,
     metadata: dict = None,
     time_range: str = "",
+    style: str = "work",
 ) -> str:
     """
     对单个会话生成结构化摘要（信息特征驱动）。
@@ -26,6 +27,7 @@ def summarize_session(
             - active_participants: 发言人数
             - keywords: 高频关键词
         time_range: 时间范围描述
+        style: "work" 工作报告风格 / "newspaper" 娱乐报纸风格（仅群聊生效）
 
     返回：
         LLM 生成的结构化摘要
@@ -41,8 +43,17 @@ def summarize_session(
     if len(messages_text) > max_chars:
         messages_text = messages_text[:max_chars] + "\n...（内容已截断）"
 
-    # 根据会话类型选择提示词模板
-    if chat_type == "群聊":
+    # 根据会话类型 + 风格选择提示词模板
+    if chat_type == "群聊" and style == "newspaper":
+        prompt = config.GROUP_NEWSPAPER_PROMPT.format(
+            chat_name=chat_name,
+            time_range=time_range or "最近一段时间",
+            msg_count=m.get("msg_count", "?"),
+            active_participants=m.get("active_participants", "?"),
+            keywords=m.get("keywords", "无"),
+            messages=messages_text,
+        )
+    elif chat_type == "群聊":
         prompt = config.GROUP_SUMMARY_PROMPT.format(
             chat_name=chat_name,
             time_range=time_range or "最近一段时间",

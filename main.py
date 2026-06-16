@@ -1,8 +1,15 @@
 """微信聊天记录总结器 — 主入口"""
 import argparse
+import io
 import sys
+import os
 from datetime import date, datetime
 from pathlib import Path
+
+# Force UTF-8 output on Windows to avoid GBK encoding errors with emoji
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 import config
 import accounts
@@ -114,6 +121,22 @@ def cmd_summary(args: argparse.Namespace) -> int:
     except Exception:
         pass
 
+    # 判断报告风格
+    style = "work"
+    if is_group:
+        try:
+            classification = classifier.classify_session(
+                chat_name=chat_name,
+                messages_preview=messages_text[:500],
+                keywords=m.get("keywords", ""),
+                metadata=m,
+            )
+            style = classification["style"]
+            style_desc = "📋 工作报告" if style == "work" else "🗞️ 群聊小报"
+            print(f"[风格判断] {style_desc}")
+        except Exception:
+            pass
+
     # 调用 LLM
     try:
         report = summarizer.summarize_session(
@@ -122,6 +145,7 @@ def cmd_summary(args: argparse.Namespace) -> int:
             messages_text=messages_text,
             metadata=m,
             time_range=time_range,
+            style=style,
         )
     except Exception as e:
         print(f"LLM 总结失败：{e}", file=sys.stderr)

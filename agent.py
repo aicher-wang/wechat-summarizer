@@ -164,6 +164,20 @@ class WechatSummarizerAgent:
         except Exception:
             pass
 
+        # 判断报告风格
+        style = "work"
+        if is_group:
+            try:
+                classification = classifier.classify_session(
+                    chat_name=chat_name,
+                    messages_preview=messages_text[:500],
+                    keywords=m.get("keywords", ""),
+                    metadata=m,
+                )
+                style = classification["style"]
+            except Exception:
+                pass
+
         try:
             report = summarizer.summarize_session(
                 chat_name=chat_name,
@@ -171,6 +185,7 @@ class WechatSummarizerAgent:
                 messages_text=messages_text,
                 metadata=m,
                 time_range=time_range,
+                style=style,
             )
         except Exception as e:
             return {"ok": False, "error": f"LLM 总结失败：{e}"}

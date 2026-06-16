@@ -1,4 +1,5 @@
 """报告导出器 — 支持多种格式"""
+import html
 import os
 import re
 from pathlib import Path
